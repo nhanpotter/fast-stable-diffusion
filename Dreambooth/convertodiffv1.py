@@ -830,7 +830,7 @@ def load_checkpoint_with_text_encoder_conversion(ckpt_path):
 
 
 # TODO dtype指定の動作が怪しいので確認する text_encoderを指定形式で作れるか未確認
-def load_models_from_stable_diffusion_checkpoint(v2, ckpt_path, dtype=None):
+def load_models_from_stable_diffusion_checkpoint(v2, ckpt_path, parse_args, dtype=None):
   
   checkpoint = load_checkpoint_with_text_encoder_conversion(ckpt_path)
   state_dict = checkpoint["state_dict"]
@@ -884,6 +884,15 @@ def load_models_from_stable_diffusion_checkpoint(v2, ckpt_path, dtype=None):
   else:
     converted_text_encoder_checkpoint = convert_ldm_clip_checkpoint_v1(state_dict)
     text_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+    
+    # Resize embeddings to include new tokens.
+    instance_names = args.instance_names.split(",")
+    assert len(instance_names) != 0
+    print(f"Resize embedding for {len(instance_names)} instances.")
+    with torch.no_grad():
+      old_emb = text_model.resize_token_embeddings()
+      text_model.resize_token_embeddings(old_emb.weight.shape[0] + len(instance_names))
+
     info = text_model.load_state_dict(converted_text_encoder_checkpoint)
 
 
@@ -1063,7 +1072,7 @@ def convert(args):
 
   if is_load_ckpt:
     v2_model = args.v2
-    text_encoder, vae, unet = load_models_from_stable_diffusion_checkpoint(v2_model, args.model_to_load)
+    text_encoder, vae, unet = load_models_from_stable_diffusion_checkpoint(v2_model, args.model_to_load, args)
   else:
     pipe = StableDiffusionPipeline.from_pretrained(args.model_to_load, torch_dtype=load_dtype, tokenizer=None, safety_checker=None)
     text_encoder = pipe.text_encoder
@@ -1105,6 +1114,8 @@ if __name__ == '__main__':
   parser.add_argument("--epoch", type=int, default=0, help='epoch to write to checkpoint / checkpointに記録するepoch数の値')
   parser.add_argument("--global_step", type=int, default=0,
                       help='global_step to write to checkpoint / checkpointに記録するglobal_stepの値')
+  parser.add_argument("--instance_names", type=str, default="",
+                      help="Instance names separated by comma")
 
   parser.add_argument("model_to_load", type=str, default=None,
                       help="model to load: checkpoint file or Diffusers model's directory / 読み込むモデル、checkpointかDiffusers形式モデルのディレクトリ")
